@@ -82,5 +82,4 @@ python main/train.py --config experiments/tatrack/train/base-got.yaml
 python main/train.py --config experiments/tatrack/train/base.yaml
 ```
 
->>>>>>> 63f9d17 (first commit)
->>>>>>> 39ec0cb (first commit)
+
