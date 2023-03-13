@@ -1,0 +1,276 @@
+test:
+  track:
+    exp_name: &TEST_NAME "got10k"
+    exp_save: &TEST_SAVE "logs/base384"
+    pipeline:
+      name: "TATrackTracker"
+      TATrackTracker:
+        # test_lr: 0.95
+        window_influence: 0.49    ##0.21
+        # penalty_k: 0.04
+        # score_size: 14
+        q_size: &TRAIN_Q_SIZE 384
+        m_size: &TRAIN_M_SIZE 192
+        num_segments : 1
+        gpu_memory_threshold: -1
+        template_area_factor: 2.0
+        search_area_factor: 4.0
+        interpolate_mode: 'bilinear'
+        method: 'mean'
+        score_size: 24
+
+    tester:
+      names: ["GOT10kTester",]
+      GOT10kTester:
+        exp_name: *TEST_NAME
+        exp_save: *TEST_SAVE
+        subsets: ["val"]
+        data_root: "datasets/GOT-10k"
+        # if set it to be larger than 1, you can't change the evaluation pipeline and hyper-parameters during the training.
+        device_num: 1
+
+train:
+  track:
+    exp_name: &TRAIN_NAME "base384"
+    exp_save: &TRAIN_SAVE "snapshots"
+    num_processes: 2
+    model:
+      use_sync_bn: False
+      backbone:
+        name: "base384"
+        base384:
+          name : "swin_base_patch4_window12_384_in22k"
+          output_layers : [2]
+
+      neck:
+        name: "Transformer"
+        Transformer:
+          position_embedding : False
+          position_type : "sine"
+          with_branch_index : True
+          absolute : True
+          relative : True
+          drop_path_rate : 0.1
+          backbone_dim : 512
+          transformer_dim : 512
+          z_shape : [12,12]
+          x_shape : [24,24]
+          num_heads : 8
+          mlp_ratio : 4
+          qkv_bias : True
+          drop_rate : 0
+          attn_drop_rate : 0
+          transformer_type : "concatenation_feature_fusion"
+          encoder_layer : 8
+          decoder_layer : 1
+
+      losses:
+        names: [
+                "VarifocalLoss",
+                "GIOULoss",]
+        VarifocalLoss:
+          name: "cls"
+          weight: 1.5
+          alpha: 0.75
+          gamma: 2.0
+        GIOULoss:
+          name: "reg"
+          weight: 1.5
+      task_head:
+        name: "Head"
+        Head:
+          score_size: &TRAIN_SCORE_SIZE 24
+          in_channels: 512
+
+      task_model:
+        name: "TATrack"
+        TATrack:
+          pretrain_model_path: ""
+          amp: &amp False ##False
+# ==================================================
+    data:
+      exp_name: *TRAIN_NAME
+      exp_save: *TRAIN_SAVE
+      num_epochs: &NUM_EPOCHS 45
+      minibatch: &MINIBATCH 20  # 256 ##64
+      num_workers: 10 ##64
+      nr_image_per_epoch: &NR_IMAGE_PER_EPOCH  300000   #319488 #262144
+      pin_memory: true
+      datapipeline:
+        name: "RegularDatapipeline"
+      sampler:
+        name: "TrackPairSampler"
+        TrackPairSampler:
+          negative_pair_ratio: 0.0
+          num_memory_frames: &NUM_MEMORY_FRAMES 2
+        submodules:
+          dataset:
+            names: [
+              "TrackingNetDataset",
+              "COCODataset",
+              "GOT10kDataset",
+              "LaSOTDataset",
+            ]
+            GOT10kDataset: &GOT10KDATASET_CFG
+              ratio: 1.0
+              max_diff: 100
+              dataset_root: "datasets/GOT-10k"
+              subset: "train"
+            GOT10kDatasetFixed: *GOT10KDATASET_CFG  # got10k dataset with exclusion of unfixed sequences
+            LaSOTDataset:
+              ratio: 1.0
+              max_diff: 100
+              dataset_root: "datasets/LaSOT"
+              subset: "train"
+              check_integrity: false 
+            COCODataset:
+              ratio: 1.0
+              dataset_root: "datasets/COCO"
+              subsets: [ "train2017", ]
+            TrackingNetDataset:
+              ratio: 1.0 # set to 0.65 if all chunks are available
+              max_diff: 100
+              dataset_root: "datasets/TrackingNet"
+              subset: "train" # "train"
+              check_integrity: false  # no need to check integrity for visualization purpose
+          filter:
+            name: "TrackPairFilter"
+            TrackPairFilter:
+              max_area_rate: 0.6
+              min_area_rate: 0.001
+              max_ratio: 100
+      transformer:
+        names: ["RandomCropTransformer", ]
+        RandomCropTransformer:
+          q_size: *TRAIN_Q_SIZE
+          m_size: *TRAIN_M_SIZE
+          num_memory_frames: *NUM_MEMORY_FRAMES
+          template_area_factor : 2.0
+          search_area_factor: 4.0
+          color_jitter : 0.4
+          template_scale_jitter_factor: 0.0
+          search_scale_jitter_factor : 0.25
+          template_translation_jitter_factor : 0.0
+          search_translation_jitter_factor : 3.0
+          gray_scale_probability: 0.05
+          interpolation_mode : 'bilinear'
+        
+      target:
+        name: "DenseboxTarget"
+        DenseboxTarget:
+          score_size: *TRAIN_SCORE_SIZE
+          q_size: *TRAIN_Q_SIZE
+          m_size: *TRAIN_M_SIZE
+          num_memory_frames: *NUM_MEMORY_FRAMES
+    trainer:
+      name: "RegularTrainer"
+      RegularTrainer:
+        exp_name: *TRAIN_NAME
+        exp_save: *TRAIN_SAVE
+        max_epoch: *NUM_EPOCHS
+        minibatch: *MINIBATCH
+        nr_image_per_epoch: *NR_IMAGE_PER_EPOCH
+        snapshot: ""
+      monitors:
+        names: ["TextInfo", "TensorboardLogger"]
+        TextInfo:
+          {}
+        TensorboardLogger:
+          exp_name: *TRAIN_NAME
+          exp_save: *TRAIN_SAVE
+
+# ==================================================
+    optim:
+      optimizer:
+        
+        # name: "SGD"
+        # SGD:
+        #   # to adjust learning rate, please modify "start_lr" and "end_lr" in lr_policy module bellow
+        #   amp: *amp
+        #   momentum: 0.9
+        #   weight_decay: 0.0001
+        #   minibatch: *MINIBATCH
+        #   nr_image_per_epoch: *NR_IMAGE_PER_EPOCH
+        #   lr_policy:    
+        name: "AdamW"
+        AdamW:
+          # to adjust learning rate, please modify "start_lr" and "end_lr" in lr_policy module bellow
+          amp: *amp
+          weight_decay: 1.e-4
+          minibatch: *MINIBATCH
+          nr_image_per_epoch: *NR_IMAGE_PER_EPOCH
+          grad_max_norm: 0.1
+          lr_policy:         
+          - >
+            {
+            "name": "LinearLR",
+            "start_lr": 0.000001,    
+            "end_lr": 0.0002,
+            "max_epoch": 1
+            }
+          - >
+            {
+            "name": "LinearLR",
+            "start_lr": 0.0002,    
+            "end_lr": 0.0002,
+            "max_epoch": 14
+            }
+          - >
+            {
+            "name": "LinearLR",
+            "start_lr": 0.0001,    
+            "end_lr": 0.0001,
+            "max_epoch": 15
+            }
+          - >
+            {
+            "name": "LinearLR",
+            "start_lr": 0.00001,    
+            "end_lr": 0.00001,
+            "max_epoch": 15
+            }
+
+          # - >            
+          #   {
+          #   "name": "LinearLR",
+          #   "start_lr": 0.00001,    
+          #   "end_lr": 0.00001,
+          #   "max_epoch": 10
+          #   }                          
+          lr_multiplier:
+          - >
+            {
+            "name": "blocks.[0-1]",
+            "regex": "^.*(blocks\.[0-1]\.|pre_stage).*$",
+            "ratio": 0.1
+            }        
+          - >
+            {
+            "name": "blocks.2-6",
+            "regex": "^.*(blocks\.[2-9]|blocks\.1[0-9]).*$",
+            "ratio": 0.2
+            }                                   
+          - >
+            {
+            "name": "other",
+            "regex": "^((?!(blocks|pre_stage)).)*$",
+            "ratio": 1.0
+            }
+      grad_modifier:
+        name: "DynamicFreezer"
+        DynamicFreezer:
+          schedule:
+          - >
+            {
+            "name": "blocks-freeze",
+            "regex": "^.*(blocks|pre_stage).*$",
+            "epoch": 0,
+            "freezed": true
+            }
+          - >
+            {
+            "name": "blocks-unfreeze",
+            "regex": "^.*(blocks|pre_stage).*$",
+            "epoch": 1,
+            "freezed": false
+            }            

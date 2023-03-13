@@ -1,0 +1,83 @@
+test:
+  track:
+    exp_name: &TEST_NAME "base-lasot"
+    exp_save: &TEST_SAVE "logs/lasot/"
+    model:
+      use_sync_bn: False
+      backbone:
+        name: "base"
+        base:
+          name : "swin_base_patch4_window7_224_in22k"
+          output_layers : [2]
+      # backbone_q:
+      #   name: "tiny_q"
+      #   tiny_q:
+      #     name : "swin_tiny_patch4_window7_224"
+      #     output_layers : [2]
+      neck:
+        name: "Transformer"
+        Transformer:
+          position_embedding : False
+          position_type : "sine"
+          with_branch_index : True
+          absolute : True
+          relative : True
+          drop_path_rate : 0.1
+          backbone_dim : 512
+          transformer_dim : 512
+          z_shape : [7,7]
+          x_shape : [14,14]
+          num_heads : 8
+          mlp_ratio : 4
+          qkv_bias : True
+          drop_rate : 0
+          attn_drop_rate : 0
+          transformer_type : "concatenation_feature_fusion"
+          encoder_layer : 8
+          decoder_layer : 1
+      losses:
+        names: []
+      task_head:
+        name: "Head"
+        Head:
+          score_size: &TRAIN_SCORE_SIZE 14
+          in_channels: 512
+      task_model:
+        name: "TATrack"
+        TATrack:
+          pretrain_model_path: "snapshots/base384.pkl"
+    pipeline:
+      name: "TATrackTracker"
+      TATrackTracker:
+        window_influence: 0.49    ##0.21
+        q_size: &TRAIN_Q_SIZE 224
+        m_size: &TRAIN_M_SIZE 112
+        num_segments : 1
+        gpu_memory_threshold: 5000
+        template_area_factor: 2.0
+        search_area_factor: 4.0
+        interpolate_mode: 'bilinear'
+        method: 'p_mean'
+        score_size: 14
+    tester:
+      # names: ["GOT10kTester",]  ##"LaSOTTester","TrackingNetTester",
+      # GOT10kTester:
+      #   exp_name: *TEST_NAME
+      #   exp_save: *TEST_SAVE
+      #   data_root: "datasets/GOT-10k"
+      #   subsets: ["test"]         #["test"]
+      #   device_num: 1
+      names: ["LaSOTTester",]
+      LaSOTTester:
+        exp_name: *TEST_NAME
+        exp_save: *TEST_SAVE
+        data_root: "datasets/LaSOT/"
+        subsets: ["test"]
+        device_num: 1
+      # names: ["TrackingNetTester",]
+      # TrackingNetTester:
+      #   exp_name: *TEST_NAME
+      #   exp_save: *TEST_SAVE
+      #   data_root: "datasets/TrackingNet/"
+      #   subsets: ["test"]
+      #   device_num: 1
